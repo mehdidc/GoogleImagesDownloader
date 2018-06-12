@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 import os
 import time
 import signal
@@ -10,6 +11,7 @@ from multiprocessing import Pool
 
 from user_agent import generate_user_agent
 from clize import run
+from selenium import webdriver
 
 
 class TimeLimitError(Exception):
@@ -23,6 +25,61 @@ class TimeLimitError(Exception):
 
 def handler(signum, frame):
     raise TimeLimitError('Time limit exceeded')
+
+
+def get_image_links(main_keyword, link_file_path, num_requested=1000):
+    """get image links with selenium
+    
+    Args:
+        main_keyword (str): main keyword
+        supplemented_keywords (list[str]): list of supplemented keywords
+        link_file_path (str): path of the file to store the links
+        num_requested (int, optional): maximum number of images to download
+    
+    Returns:
+        None
+    """
+    number_of_scrolls = int(num_requested / 400) + 1 
+    # number_of_scrolls * 400 images will be opened in the browser
+
+    img_urls = set()
+    driver = webdriver.Firefox()
+    search_query = main_keyword
+    url = "https://www.google.com/search?q="+search_query+"&source=lnms&tbm=isch"
+    driver.get(url)
+    
+    for _ in range(number_of_scrolls):
+        for __ in range(10):
+            # multiple scrolls needed to show all 400 images
+            driver.execute_script("window.scrollBy(0, 1000000)")
+            time.sleep(2)
+        # to load next 400 images
+        time.sleep(5)
+        try:
+            driver.find_element_by_xpath("//input[@value='Show more results']").click()
+        except Exception as e:
+            print("Process-{0} reach the end of page or get the maximum number of requested images".format(main_keyword))
+            break
+
+    # imges = driver.find_elements_by_xpath('//div[@class="rg_meta"]') # not working anymore
+    imges = driver.find_elements_by_xpath('//div[contains(@class,"rg_meta")]')
+    for img in imges:
+        img_url = json.loads(img.get_attribute('innerHTML'))["ou"]
+        # img_type = json.loads(img.get_attribute('innerHTML'))["ity"]
+        img_urls.add(img_url)
+    print('Process-{0}, got {1} image urls so far'.format(main_keyword, len(img_urls)))
+    print('Process-{0} totally get {1} images'.format(main_keyword, len(img_urls)))
+    driver.quit()
+
+    print(link_file_path)
+    if not os.path.exists(os.path.dirname(link_file_path)):
+        os.makedirs(os.path.dirname(link_file_path))
+    with open(link_file_path, 'w') as wf:
+        for url in img_urls:
+            wf.write(url +'\n')
+    print('Store all the links in file {0}'.format(link_file_path))
+    from subprocess import call
+
 
 
 def download_with_time_limit(
@@ -89,15 +146,22 @@ def download_with_time_limit(
                 continue
 
 
-def main(keywords_file='keywords.txt', out_folder='out', supp=''):
+def main(keywords_file='keywords.txt', *, out_folder='out', supp=''):
     keywords = open(keywords_file).readlines()
     keywords = [k.strip() for k in keywords]
-    main_keywords = keywords
-    download_dir = '{}/data_limit_time/'.format(out_folder)
-    link_files_dir = '{}/data/link_files/'.format(out_folder)
-    log_dir = '{}/logs_limit_time/'.format(out_folder)
+    download_dir = out_folder + '/'
+    link_files_dir = '{}/link_files/'.format(out_folder)
+    log_dir = '{}/logs/'.format(out_folder)
+    p = Pool(3)
+    for keyword in keywords:
+        p.apply_async(
+            get_image_links,
+            args=(keyword, link_files_dir + keyword))
+    p.close()
+    p.join()
+    print('Fininsh getting all image links')
     p = Pool()
-    for keyword in main_keywords:
+    for keyword in keywords:
         p.apply_async(
             download_with_time_limit,
             args=(link_files_dir + keyword, download_dir, log_dir))
