@@ -1,4 +1,3 @@
-
 import json
 import os
 import time
@@ -7,7 +6,7 @@ import logging
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
-from multiprocessing import Pool
+import hashlib
 
 from user_agent import generate_user_agent
 from clize import run
@@ -43,9 +42,10 @@ def get_image_links(main_keyword, link_file_path, num_requested=1000):
     img_urls = set()
     driver = webdriver.Firefox()
     search_query = main_keyword
-    url = "https://www.google.com/search?q="+search_query+"&source=lnms&tbm=isch"
+    url = "https://www.google.com/search?q="+search_query+"&source=lnms&tbm=isch&hl=en"
     driver.get(url)
     for _ in range(number_of_scrolls):
+        print('scroll')
         for __ in range(10):
             # multiple scrolls needed to show all 400 images
             driver.execute_script("window.scrollBy(0, 1000000)")
@@ -55,6 +55,7 @@ def get_image_links(main_keyword, link_file_path, num_requested=1000):
         try:
             driver.find_element_by_xpath("//input[@value='Show more results']").click()
         except Exception as e:
+            print(e)
             print("Process-{0} reach the end of page or get the maximum number of requested images".format(main_keyword))
             break
     imges = driver.find_elements_by_xpath('//div[contains(@class,"rg_meta")]')
@@ -70,7 +71,7 @@ def get_image_links(main_keyword, link_file_path, num_requested=1000):
         os.makedirs(os.path.dirname(link_file_path))
     with open(link_file_path, 'w') as wf:
         for url in img_urls:
-            wf.write(url +'\n')
+            wf.write(url + '\n')
     print('Store all the links in file {0}'.format(link_file_path))
 
 
@@ -82,7 +83,10 @@ def download_with_time_limit(
     main_keyword = link_file_path.split('/')[-1]
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    log_file = log_dir + 'download_selenium_{0}.log'.format(main_keyword)
+    log_file = os.path.join(
+        log_dir,
+        'download_selenium_{0}.log'.format(main_keyword)
+    )
     logging.basicConfig(
         level=logging.DEBUG,
         filename=log_file,
@@ -97,10 +101,10 @@ def download_with_time_limit(
     signal.signal(signal.SIGALRM, handler)
     with open(link_file_path, 'r') as rf:
         for link in rf:
-            file_path = os.path.join(img_dir, '{0}.jpg'.format(count))
+            link_hash = hashlib.md5(link.encode('utf8')).hexdigest()
+            file_path = os.path.join(img_dir, '{0}.jpg'.format(link_hash))
             if os.path.exists(file_path):
                 print('{} already downloaded, pass'.format(file_path))
-                count += 1
                 continue
             try:
                 ref = 'https://www.google.com'
@@ -123,7 +127,7 @@ def download_with_time_limit(
 
                 with open(file_path,'wb') as wf:
                     wf.write(data)
-                print('Process-{0} download image {1}/{2}.jpg'.format(main_keyword, main_keyword, count))
+                print('Process-{0} download image {1}'.format(main_keyword, file_path))
                 count += 1
                 if count % 10 == 0:
                     print('Process-{0} is sleeping'.format(main_keyword))
@@ -140,6 +144,7 @@ def download_with_time_limit(
                 print('Unexpected Error')
                 logging.error('Unexpeted error while downloading image {0}error type:{1}, args:{2}'.format(link, type(e), e.args))
                 continue
+
 
 
 def main(
