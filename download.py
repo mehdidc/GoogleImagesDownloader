@@ -144,14 +144,20 @@ def main(keywords_file='keywords.txt', *, out_folder='out', nb_per_class=1000):
     link_files_dir = os.path.join(out_folder, 'link_files')
     log_dir = os.path.join(out_folder, 'logs')
     for keyword in keywords:
+        keyword_slug = keyword.replace(' ', '_')
         get_image_links(
             keyword,
-            os.path.join(link_files_dir, keyword),
+            os.path.join(link_files_dir, keyword_slug),
             num_requested=nb_per_class)
     print('Fininsh getting all image links')
     p = Pool()
     for keyword in keywords:
-        args = (os.path.join(link_files_dir, keyword), download_dir, log_dir)
+        keyword_slug = keyword.replace(' ', '_')
+        args = (
+            os.path.join(link_files_dir, keyword_slug),
+            download_dir,
+            log_dir
+        )
         p.apply_async(download_with_time_limit, args=args)
     p.close()
     p.join()
