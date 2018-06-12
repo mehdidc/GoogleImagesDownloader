@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 import json
 import os
 import time
@@ -12,6 +12,7 @@ from multiprocessing import Pool
 from user_agent import generate_user_agent
 from clize import run
 from selenium import webdriver
+from joblib import Parallel, delayed
 
 
 class TimeLimitError(Exception):
@@ -88,7 +89,7 @@ def download_with_time_limit(
         filemode="a+",
         format="%(asctime)-15s %(levelname)-8s  %(message)s")
     folder = main_keyword.replace(' ', '_')
-    img_dir = download_dir + folder + '/'
+    img_dir = os.path.join(download_dir, folder)
     count = 0
     headers = {}
     if not os.path.exists(img_dir):
@@ -96,6 +97,11 @@ def download_with_time_limit(
     signal.signal(signal.SIGALRM, handler)
     with open(link_file_path, 'r') as rf:
         for link in rf:
+            file_path = os.path.join(img_dir, '{0}.jpg'.format(count))
+            if os.path.exists(file_path):
+                print('{} already downloaded, pass'.format(file_path))
+                count += 1
+                continue
             try:
                 ref = 'https://www.google.com'
                 o = urlparse(link)
@@ -115,7 +121,6 @@ def download_with_time_limit(
                 finally:
                     signal.alarm(0)
 
-                file_path = img_dir + '{0}.jpg'.format(count)
                 with open(file_path,'wb') as wf:
                     wf.write(data)
                 print('Process-{0} download image {1}/{2}.jpg'.format(main_keyword, main_keyword, count))
@@ -137,7 +142,14 @@ def download_with_time_limit(
                 continue
 
 
-def main(keywords_file='keywords.txt', *, out_folder='out', nb_per_class=1000):
+def main(
+    keywords_file='keywords.txt',
+    *,
+    out_folder='out',
+    nb_per_class=1000,
+    nb_jobs=1,
+    limit_time_sec=10):
+
     keywords = open(keywords_file).readlines()
     keywords = [k.strip() for k in keywords]
     download_dir = os.path.join(out_folder, 'data')
@@ -145,22 +157,26 @@ def main(keywords_file='keywords.txt', *, out_folder='out', nb_per_class=1000):
     log_dir = os.path.join(out_folder, 'logs')
     for keyword in keywords:
         keyword_slug = keyword.replace(' ', '_')
+        link_file = os.path.join(link_files_dir, keyword_slug)
+        if os.path.exists(link_file):
+            print('Link file {} exists, pass'.format(link_file))
+            continue
         get_image_links(
             keyword,
-            os.path.join(link_files_dir, keyword_slug),
+            link_file,
             num_requested=nb_per_class)
     print('Fininsh getting all image links')
-    p = Pool()
+    args_list = []
     for keyword in keywords:
         keyword_slug = keyword.replace(' ', '_')
+        link_file = os.path.join(link_files_dir, keyword_slug)
         args = (
-            os.path.join(link_files_dir, keyword_slug),
+            link_file,
             download_dir,
             log_dir
         )
-        p.apply_async(download_with_time_limit, args=args)
-    p.close()
-    p.join()
+        args_list.append(args)
+    Parallel(n_jobs=nb_jobs)(delayed(download_with_time_limit)(*args, limit_time=limit_time_sec) for args in args_list)
     print('Finish downloading all images')
 
 
